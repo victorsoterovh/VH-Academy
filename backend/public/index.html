@@ -333,197 +333,152 @@
 
 <script>
 /* ==========================================================================
-   PROTÓTIPO — login e permissões aqui são só uma simulação de UX.
-   BACKEND: autenticação real (senhas com hash, sessão/JWT, recuperação de
-   acesso, envio de credencial no e-mail do responsável após a aprovação
-   do cadastro) entra junto com o backend de verdade.
+   VH Soccer — Frontend integrado com backend real (JWT + fetch)
    ========================================================================== */
 
-let state = {
-  session: null,          // null | {role:'admin'} | {role:'cliente', cpf:'somente dígitos'}
-  view: 'cadastro',        // cadastro | login | painel | ficha | turmas | turmaDetalhe | clientePainel | clienteFilho
-  filter: 'pendentes',
-  selectedId: null,
-  selectedTurmaId: null,
-  showAprovarModal: null,
-  showCobrancaModal: null,
-  showTurmaModal: null,    // null | true | {modalidade, unidade, returnToAprovar}
-  cadastroEnviado: false,
-  protocolo: null,
-  loginTab: 'admin',       // 'admin' | 'cliente'
-  loginError: null,
-};
+const API_BASE = ''; // mesma origem — frontend e backend no mesmo Vercel
 
-const unidades = ['Metrópole', 'Lourdes', 'Quintas do Sol'];
+/* ---------- Session (localStorage) ---------- */
+function saveSession(data){ localStorage.setItem('vh_session', JSON.stringify(data)); state.session=data; }
+function loadSession(){ try{ const s=localStorage.getItem('vh_session'); return s?JSON.parse(s):null; }catch{ return null; } }
+function clearSession(){ localStorage.removeItem('vh_session'); state.session=null; }
 
-const modalidades = [
-  { id:'futsal', nome:'Futsal', desc:'Infantil e adulto', icon:'⚽' },
-  { id:'beach', nome:'Beach Tennis', desc:'Turmas mistas', icon:'🎾' },
-  { id:'nat', nome:'Natação', desc:'Todas as idades', icon:'🏊' },
-  { id:'futv', nome:'Futevôlei', desc:'Adulto', icon:'🏐' },
-];
-
-/* ---------- Turmas (agora entidades reais, criadas pelo admin) ---------- */
-let turmas = [
-  { id:'t1', nome:'Sub-7', modalidade:'futsal', unidade:'Metrópole', horario:'Ter/Qui · 16h', capacidade:16 },
-  { id:'t2', nome:'Sub-9', modalidade:'futsal', unidade:'Metrópole', horario:'Seg/Qua · 17h', capacidade:16 },
-  { id:'t3', nome:'Sub-11', modalidade:'futsal', unidade:'Metrópole', horario:'Seg/Qua · 18h', capacidade:16 },
-  { id:'t4', nome:'Avançado', modalidade:'beach', unidade:'Quintas do Sol', horario:'Sáb · 11h', capacidade:8 },
-  { id:'t5', nome:'Turma única', modalidade:'futv', unidade:'Lourdes', horario:'Sex · 18h', capacidade:12 },
-  { id:'t6', nome:'Adulto', modalidade:'nat', unidade:'Lourdes', horario:'Seg/Qua · 19h', capacidade:10 },
-];
-let nextTurmaId = 7;
-
-/* ---------- Base de alunos (mock em memória) ---------- */
-let alunos = [
-  {
-    id:1, atletaTipo:'filho', nome:'João Pedro Silva', nascimento:'2019-03-14',
-    condominio:'Reserva do Bosque · Bloco 3', unidade:'Metrópole', modalidade:'futsal',
-    status:'pendente', turmaId:null,
-    pagador:{ nome:'Marcos Silva', cpf:'123.456.789-00', email:'marcos.silva@email.com', celular:'(31) 99123-4567',
-      endereco:{ cep:'30380-000', logradouro:'Rua das Palmeiras', numero:'120', complemento:'', bairro:'Buritis', cidade:'Belo Horizonte', uf:'MG' } },
-    cobrancas:[]
-  },
-  {
-    id:2, atletaTipo:'filho', nome:'Maria Eduarda Ramos', nascimento:'2017-07-02',
-    condominio:'Alphaville Lagoa · Casa 12', unidade:'Lourdes', modalidade:'nat',
-    status:'pendente', turmaId:null,
-    pagador:{ nome:'Fernanda Ramos', cpf:'987.654.321-00', email:'fe.ramos@email.com', celular:'(31) 98877-1122',
-      endereco:{ cep:'30140-000', logradouro:'Rua Padre Rolim', numero:'88', complemento:'Apto 302', bairro:'Lourdes', cidade:'Belo Horizonte', uf:'MG' } },
-    cobrancas:[]
-  },
-  {
-    id:3, atletaTipo:'filho', nome:'Enzo Martins', nascimento:'2017-01-20',
-    condominio:'Reserva do Bosque · Bloco 1', unidade:'Metrópole', modalidade:'futsal',
-    status:'ativo', turmaId:'t2',
-    pagador:{ nome:'Camila Martins', cpf:'456.789.123-00', email:'camila.martins@email.com', celular:'(31) 99456-7788',
-      endereco:{ cep:'30380-010', logradouro:'Av. Raja Gabaglia', numero:'2000', complemento:'', bairro:'Estoril', cidade:'Belo Horizonte', uf:'MG' } },
-    cobrancas:[
-      { id:'c1', tipo:'recorrente', valor:180, vencimento:'2026-07-10', descricao:'Mensalidade Futsal Sub-9 — Julho/2026', status:'pago', link:'https://www.asaas.com/i/exemplo-c1' },
-      { id:'c2', tipo:'recorrente', valor:180, vencimento:'2026-08-10', descricao:'Mensalidade Futsal Sub-9 — Agosto/2026', status:'pendente', link:'https://www.asaas.com/i/exemplo-c2' },
-    ]
-  },
-  {
-    id:4, atletaTipo:'proprio', nome:'Rafael Souza', nascimento:'1990-11-05',
-    condominio:'Vila das Palmeiras · Bloco 7', unidade:'Quintas do Sol', modalidade:'beach',
-    status:'ativo', turmaId:'t4',
-    pagador:{ nome:'Rafael Souza', cpf:'321.654.987-00', email:'rafael.souza@email.com', celular:'(31) 99321-6655',
-      endereco:{ cep:'30320-000', logradouro:'Rua Sergipe', numero:'450', complemento:'', bairro:'Funcionários', cidade:'Belo Horizonte', uf:'MG' } },
-    cobrancas:[
-      { id:'c3', tipo:'recorrente', valor:220, vencimento:'2026-06-10', descricao:'Mensalidade Beach Tennis — Junho/2026', status:'pago', link:'https://www.asaas.com/i/exemplo-c3' },
-      { id:'c4', tipo:'recorrente', valor:220, vencimento:'2026-07-10', descricao:'Mensalidade Beach Tennis — Julho/2026', status:'atrasado', link:'https://www.asaas.com/i/exemplo-c4' },
-    ]
-  },
-  {
-    id:5, atletaTipo:'filho', nome:'Bernardo Lima', nascimento:'2013-09-30',
-    condominio:'Alphaville Lagoa · Casa 45', unidade:'Lourdes', modalidade:'futv',
-    status:'ativo', turmaId:'t5',
-    pagador:{ nome:'André Lima', cpf:'654.321.987-00', email:'andre.lima@email.com', celular:'(31) 99654-3322',
-      endereco:{ cep:'30140-005', logradouro:'Rua Ceará', numero:'300', complemento:'', bairro:'Lourdes', cidade:'Belo Horizonte', uf:'MG' } },
-    cobrancas:[
-      { id:'c5', tipo:'recorrente', valor:190, vencimento:'2026-08-10', descricao:'Mensalidade Futevôlei — Agosto/2026', status:'pago', link:'https://www.asaas.com/i/exemplo-c5' },
-    ]
-  },
-];
-let nextId = 6;
-let toastMsg = null;
-
-/* ---------- Formulário de cadastro (estado local do form público) ---------- */
-let form = {
-  atletaTipo: 'filho', atletaNome: '', atletaNascimento: '', condominio: '', unidade: '',
-  pagadorNome: '', pagadorCpf: '', pagadorEmail: '', pagadorCelular: '',
-  cep: '', endereco: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '',
-  modalidade: null,
-};
-function resetForm(){
-  form = { atletaTipo:'filho', atletaNome:'', atletaNascimento:'', condominio:'', unidade:'',
-    pagadorNome:'', pagadorCpf:'', pagadorEmail:'', pagadorCelular:'',
-    cep:'', endereco:'', numero:'', complemento:'', bairro:'', cidade:'', uf:'', modalidade:null };
+/* ---------- API helper ---------- */
+async function apiFetch(path, opts={}){
+  const headers={'Content-Type':'application/json'};
+  if(state.session?.token) headers['Authorization']='Bearer '+state.session.token;
+  let res;
+  try{ res=await fetch(API_BASE+path,{...opts,headers:{...headers,...(opts.headers||{})}}); }
+  catch(e){ throw new Error('Sem conexão com o servidor.'); }
+  if(res.status===401){ clearSession(); state.view='login'; render(); throw new Error('Sessão expirada. Faça login novamente.'); }
+  const data=await res.json();
+  if(!res.ok) throw new Error(data.erro||'Erro '+res.status);
+  return data;
 }
+
+/* ---------- Estado global ---------- */
+let state={
+  session: loadSession(),
+  view:'cadastro', filter:'pendentes',
+  selectedId:null, selectedTurmaId:null,
+  showAprovarModal:null, showCobrancaModal:null, showTurmaModal:null,
+  cadastroEnviado:false, protocolo:null,
+  loginTab:'admin', loginError:null,
+  alunos:[], turmas:[], alunoDetalhe:null,
+  turmaAlunos:[], clienteAlunos:[], clienteFilhoDetalhe:null,
+  loading:false,
+};
+if(state.session) state.view=state.session.role==='admin'?'painel':'clientePainel';
+
+const unidades=['Metrópole','Lourdes','Quintas do Sol'];
+const modalidades=[
+  {id:'futsal',nome:'Futsal',desc:'Infantil e adulto',icon:'⚽'},
+  {id:'beach',nome:'Beach Tennis',desc:'Turmas mistas',icon:'🎾'},
+  {id:'nat',nome:'Natação',desc:'Todas as idades',icon:'🏊'},
+  {id:'futv',nome:'Futevôlei',desc:'Adulto',icon:'🏐'},
+];
+
+/* ---------- Form de cadastro ---------- */
+let form={atletaTipo:'filho',atletaNome:'',atletaNascimento:'',condominio:'',unidade:'',
+  pagadorNome:'',pagadorCpf:'',pagadorEmail:'',pagadorCelular:'',
+  cep:'',endereco:'',numero:'',complemento:'',bairro:'',cidade:'',uf:'',modalidade:null};
+function resetForm(){ form={atletaTipo:'filho',atletaNome:'',atletaNascimento:'',condominio:'',unidade:'',
+  pagadorNome:'',pagadorCpf:'',pagadorEmail:'',pagadorCelular:'',
+  cep:'',endereco:'',numero:'',complemento:'',bairro:'',cidade:'',uf:'',modalidade:null}; }
+
+let toastMsg=null;
 
 /* ---------- Helpers ---------- */
-const fmtMoney = v => 'R$ ' + v.toFixed(2).replace('.', ',');
-const fmtDate = d => { const [y,m,dd]=d.split('-'); return `${dd}/${m}/${y}`; };
-const idade = nasc => { const b=new Date(nasc); const n=new Date(); let a=n.getFullYear()-b.getFullYear(); if(n.getMonth()<b.getMonth()||(n.getMonth()===b.getMonth()&&n.getDate()<b.getDate())) a--; return a; };
-const initials = nome => nome.split(' ').filter(w=>w.length>1).slice(0,2).map(w=>w[0]).join('').toUpperCase();
-const modalidadeInfo = id => modalidades.find(m=>m.id===id) || {nome:'—', icon:''};
-const turmaById = id => turmas.find(t=>t.id===id) || null;
-const cpfDigits = v => (v||'').replace(/\D/g,'');
-
-function computeStatus(aluno){
-  if(aluno.status==='pendente') return 'pendente';
-  const atrasado = aluno.cobrancas.some(c=>c.status==='atrasado');
-  return atrasado ? 'inadimplente' : 'ativo';
-}
-function showToast(msg){ toastMsg = msg; renderToastOnly(); setTimeout(()=>{ toastMsg=null; renderToastOnly(); }, 2800); }
+const fmtMoney=v=>'R$ '+parseFloat(v).toFixed(2).replace('.',',');
+const fmtDate=d=>{ if(!d) return '—'; const [y,m,dd]=d.split('-'); return `${dd}/${m}/${y}`; };
+const idade=nasc=>{ const b=new Date(nasc),n=new Date(); let a=n.getFullYear()-b.getFullYear(); if(n.getMonth()<b.getMonth()||(n.getMonth()===b.getMonth()&&n.getDate()<b.getDate()))a--; return a; };
+const initials=nome=>nome.split(' ').filter(w=>w.length>1).slice(0,2).map(w=>w[0]).join('').toUpperCase();
+const modalidadeInfo=id=>modalidades.find(m=>m.id===id)||{nome:'—',icon:''};
+const cpfDigits=v=>(v||'').replace(/\D/g,'');
+function computeStatus(a){ if(a.status==='pendente') return 'pendente'; return a.inadimplente?'inadimplente':'ativo'; }
+function showToast(msg){ toastMsg=msg; renderToastOnly(); setTimeout(()=>{ toastMsg=null; renderToastOnly(); },2800); }
 
 /* ---------- Máscaras + CEP ---------- */
 function maskCpf(v){ return v.replace(/\D/g,'').slice(0,11).replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d{1,2})$/,'$1-$2'); }
 function maskCelular(v){ return v.replace(/\D/g,'').slice(0,11).replace(/(\d{2})(\d)/,'($1) $2').replace(/(\d{5})(\d)/,'$1-$2'); }
 function maskCep(v){ return v.replace(/\D/g,'').slice(0,8).replace(/(\d{5})(\d)/,'$1-$2'); }
 async function buscarCep(cepRaw){
-  const cep = cepRaw.replace(/\D/g,'');
-  if(cep.length !== 8) return;
-  try{
-    const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
-    const data = await res.json();
-    if(!data.erro){
-      form.endereco = data.logradouro || form.endereco;
-      form.bairro = data.bairro || form.bairro;
-      form.cidade = data.localidade || form.cidade;
-      form.uf = data.uf || form.uf;
-      render();
-    }
-  }catch(e){ /* silencioso */ }
+  const cep=cepRaw.replace(/\D/g,''); if(cep.length!==8) return;
+  try{ const r=await fetch(`https://viacep.com.br/ws/${cep}/json/`),d=await r.json();
+    if(!d.erro){ form.endereco=d.logradouro||form.endereco; form.bairro=d.bairro||form.bairro; form.cidade=d.localidade||form.cidade; form.uf=d.uf||form.uf; render(); }
+  }catch(e){}
 }
 function validoForm(){
-  return form.atletaNascimento && form.condominio && form.unidade &&
-    (form.atletaTipo==='proprio' || form.atletaNome) &&
-    form.pagadorNome && form.pagadorCpf.replace(/\D/g,'').length===11 &&
-    form.pagadorEmail.includes('@') && form.pagadorCelular.replace(/\D/g,'').length>=10 &&
-    form.endereco && form.numero && form.bairro && form.cidade && form.uf &&
-    form.modalidade;
+  return form.atletaNascimento&&form.condominio&&form.unidade&&
+    (form.atletaTipo==='proprio'||form.atletaNome)&&
+    form.pagadorNome&&cpfDigits(form.pagadorCpf).length===11&&
+    form.pagadorEmail.includes('@')&&cpfDigits(form.pagadorCelular).length>=10&&
+    form.endereco&&form.numero&&form.bairro&&form.cidade&&form.uf&&form.modalidade;
 }
 
-/* ---------- Tabs (mudam conforme sessão) ---------- */
+/* ---------- Carregadores de dados ---------- */
+async function carregarAlunos(){ state.loading=true; try{ state.alunos=await apiFetch('/api/alunos'); }catch(e){ showToast(e.message); state.alunos=[]; } state.loading=false; }
+async function carregarTurmas(){ state.loading=true; try{ state.turmas=await apiFetch('/api/turmas'); }catch(e){ showToast(e.message); state.turmas=[]; } state.loading=false; }
+async function carregarFicha(id){ state.loading=true; try{ state.alunoDetalhe=await apiFetch(`/api/alunos/${id}`); }catch(e){ showToast(e.message); state.alunoDetalhe=null; } state.loading=false; }
+async function carregarTurmaAlunos(id){ state.loading=true; try{ state.turmaAlunos=await apiFetch(`/api/turmas/${id}/alunos`); }catch(e){ showToast(e.message); state.turmaAlunos=[]; } state.loading=false; }
+async function carregarClienteAlunos(){ state.loading=true; try{ state.clienteAlunos=await apiFetch('/api/cliente/alunos'); }catch(e){ showToast(e.message); state.clienteAlunos=[]; } state.loading=false; }
+async function carregarClienteFilho(id){ state.loading=true; try{ state.clienteFilhoDetalhe=await apiFetch(`/api/cliente/alunos/${id}`); }catch(e){ showToast(e.message); state.clienteFilhoDetalhe=null; } state.loading=false; }
+
+/* ---------- Navegação com carregamento ---------- */
+async function navigate(view){
+  state.view=view; state.showAprovarModal=null; state.showCobrancaModal=null; state.showTurmaModal=null;
+  render();
+  if(view==='painel') await carregarAlunos();
+  if(view==='turmas') await carregarTurmas();
+  if(view==='ficha'){ await carregarFicha(state.selectedId); await carregarTurmas(); }
+  if(view==='turmaDetalhe'){ await carregarTurmas(); await carregarTurmaAlunos(state.selectedTurmaId); }
+  if(view==='clientePainel') await carregarClienteAlunos();
+  if(view==='clienteFilho') await carregarClienteFilho(state.selectedId);
+  render();
+}
+
+/* ---------- Tabs ---------- */
 function renderTabs(){
-  const tabs = document.getElementById('tabs');
+  const tabs=document.getElementById('tabs');
   if(!state.session){
-    tabs.innerHTML = `
+    tabs.innerHTML=`
       <button class="tab-btn ${state.view==='cadastro'?'active':''}" data-tab="cadastro">Cadastro</button>
       <button class="tab-btn ${state.view==='login'?'active':''}" data-tab="login">Entrar</button>
     `;
   } else if(state.session.role==='admin'){
-    tabs.innerHTML = `
+    tabs.innerHTML=`
       <button class="tab-btn ${['painel','ficha'].includes(state.view)?'active':''}" data-tab="painel">Alunos</button>
       <button class="tab-btn ${['turmas','turmaDetalhe'].includes(state.view)?'active':''}" data-tab="turmas">Turmas</button>
       <button class="tab-btn sair" data-tab="sair">Sair ↩</button>
     `;
   } else {
-    tabs.innerHTML = `
+    tabs.innerHTML=`
       <button class="tab-btn ${['clientePainel','clienteFilho'].includes(state.view)?'active':''}" data-tab="clientePainel">Meus Atletas</button>
       <button class="tab-btn sair" data-tab="sair">Sair ↩</button>
     `;
   }
   tabs.querySelectorAll('.tab-btn').forEach(btn=>{
-    btn.onclick = ()=>{
+    btn.onclick=()=>{
       if(btn.dataset.tab==='sair'){ logout(); return; }
-      state.view = btn.dataset.tab;
-      if(btn.dataset.tab==='cadastro'){ state.cadastroEnviado=false; resetForm(); }
-      if(btn.dataset.tab==='login'){ state.loginError=null; }
-      render();
+      if(btn.dataset.tab==='cadastro'){ state.cadastroEnviado=false; resetForm(); state.view='cadastro'; render(); return; }
+      if(btn.dataset.tab==='login'){ state.loginError=null; state.view='login'; render(); return; }
+      navigate(btn.dataset.tab);
     };
   });
 }
 function logout(){
-  state.session = null; state.view = 'cadastro'; state.loginError = null;
-  state.selectedId = null; state.selectedTurmaId = null;
+  clearSession(); state.view='cadastro'; state.loginError=null;
+  state.selectedId=null; state.selectedTurmaId=null;
+  state.alunos=[]; state.turmas=[]; state.alunoDetalhe=null; state.clienteAlunos=[]; state.clienteFilhoDetalhe=null;
   render();
 }
 
+/* ---------- Loading ---------- */
+const loadingHTML=()=>`<div class="empty-state"><div class="ball">⏳</div>Carregando...</div>`;
+
 /* ---------- Login ---------- */
 function renderLogin(){
-  document.getElementById('appWrap').className = 'wrap wrap-login';
+  document.getElementById('appWrap').className='wrap wrap-login';
   return `
     <div class="login-logo">
       <div class="brand-badge">VH</div>
@@ -536,48 +491,44 @@ function renderLogin(){
         <div class="seg-opt ${state.loginTab==='cliente'?'sel':''}" data-login-tab="cliente">Sou responsável</div>
       </div>
       <form id="loginForm">
-        ${state.loginTab==='admin' ? `
-          <div class="field" style="margin-bottom:14px;"><label>Usuário</label><input name="usuario" placeholder="admin"></div>
-          <div class="field"><label>Senha</label><input type="password" name="senha" placeholder="••••••••"></div>
-          <div class="demo-hint">Demonstração: usuário <strong>admin</strong> / senha <strong>admin123</strong></div>
-        ` : `
-          <div class="field" style="margin-bottom:14px;"><label>CPF do responsável</label><input name="cpf" placeholder="000.000.000-00" maxlength="14"></div>
-          <div class="field"><label>Senha</label><input type="password" name="senha" placeholder="••••••••"></div>
-          <div class="demo-hint">Demonstração: use o CPF de um responsável já cadastrado (ex.: <strong>456.789.123-00</strong>, mãe do Enzo) com qualquer senha.</div>
+        ${state.loginTab==='admin'?`
+          <div class="field" style="margin-bottom:14px;"><label>Usuário</label><input name="usuario" placeholder="admin" autocomplete="username"></div>
+          <div class="field"><label>Senha</label><input type="password" name="senha" placeholder="••••••••" autocomplete="current-password"></div>
+        `:`
+          <div class="field" style="margin-bottom:14px;"><label>CPF do responsável</label><input name="cpf" placeholder="000.000.000-00" maxlength="14" autocomplete="username"></div>
+          <div class="field"><label>Senha</label><input type="password" name="senha" placeholder="••••••••" autocomplete="current-password"></div>
         `}
-        ${state.loginError ? `<p class="error-text">${state.loginError}</p>` : ''}
-        <button type="submit" class="btn btn-cone btn-block" style="margin-top:18px;">Entrar</button>
+        ${state.loginError?`<p class="error-text">${state.loginError}</p>`:''}
+        <button type="submit" class="btn btn-cone btn-block" style="margin-top:18px;" id="loginBtn">Entrar</button>
       </form>
     </div>
   `;
 }
 function wireLogin(){
-  document.querySelectorAll('[data-login-tab]').forEach(el=>{
-    el.onclick = ()=>{ state.loginTab = el.dataset.loginTab; state.loginError=null; render(); };
-  });
-  const cpfInput = document.querySelector('#loginForm input[name="cpf"]');
-  if(cpfInput) cpfInput.oninput = ()=>{ cpfInput.value = maskCpf(cpfInput.value); };
-
-  document.getElementById('loginForm').onsubmit = e=>{
+  document.querySelectorAll('[data-login-tab]').forEach(el=>{ el.onclick=()=>{ state.loginTab=el.dataset.loginTab; state.loginError=null; render(); }; });
+  const cpfInput=document.querySelector('#loginForm input[name="cpf"]');
+  if(cpfInput) cpfInput.oninput=()=>{ cpfInput.value=maskCpf(cpfInput.value); };
+  document.getElementById('loginForm').onsubmit=async e=>{
     e.preventDefault();
-    const f = new FormData(e.target);
-    if(state.loginTab==='admin'){
-      if(f.get('usuario')==='admin' && f.get('senha')==='admin123'){
-        state.session = { role:'admin' }; state.view='painel'; state.loginError=null; render();
-      } else { state.loginError = 'Usuário ou senha inválidos.'; render(); }
-    } else {
-      const digits = cpfDigits(f.get('cpf'));
-      const existe = alunos.some(a=>cpfDigits(a.pagador.cpf)===digits);
-      if(digits.length===11 && existe && f.get('senha')){
-        state.session = { role:'cliente', cpf:digits }; state.view='clientePainel'; state.loginError=null; render();
-      } else { state.loginError = 'CPF não encontrado ou senha em branco. Verifique com a academia.'; render(); }
-    }
+    const f=new FormData(e.target),btn=document.getElementById('loginBtn');
+    btn.disabled=true; btn.textContent='Entrando...'; state.loginError=null;
+    try{
+      if(state.loginTab==='admin'){
+        const data=await apiFetch('/api/auth/admin/login',{method:'POST',body:JSON.stringify({usuario:f.get('usuario'),senha:f.get('senha')})});
+        saveSession({role:'admin',token:data.token});
+        await navigate('painel');
+      } else {
+        const data=await apiFetch('/api/auth/cliente/login',{method:'POST',body:JSON.stringify({cpf:f.get('cpf'),senha:f.get('senha')})});
+        saveSession({role:'cliente',token:data.token,nome:data.nome});
+        await navigate('clientePainel');
+      }
+    }catch(err){ state.loginError=err.message; render(); }
   };
 }
 
-/* ---------- Cadastro (público) ---------- */
+/* ---------- Cadastro ---------- */
 function renderCadastro(){
-  document.getElementById('appWrap').className = 'wrap wrap-narrow';
+  document.getElementById('appWrap').className='wrap wrap-narrow';
   if(state.cadastroEnviado){
     return `
       <div class="card confirm-box">
@@ -594,9 +545,7 @@ function renderCadastro(){
     <div class="hero stack">
       <p class="display">Matricule-se</p>
       <p>Preencha seus dados e os do atleta para liberar a matrícula. Assim que confirmarmos, a cobrança da mensalidade chega direto no seu e-mail/celular.</p>
-      <div class="sport-strip">
-        ${modalidades.map(m=>`<span class="sport-pill">${m.icon} ${m.nome}</span>`).join('')}
-      </div>
+      <div class="sport-strip">${modalidades.map(m=>`<span class="sport-pill">${m.icon} ${m.nome}</span>`).join('')}</div>
     </div>
     <form id="cadastroForm">
       <div class="card">
@@ -606,7 +555,6 @@ function renderCadastro(){
           <div class="seg-opt ${form.atletaTipo==='filho'?'sel':''}" data-tipo="filho">Meu filho(a)</div>
         </div>
       </div>
-
       <div class="card">
         <div class="section-label">Dados do pagador / responsável</div>
         <div class="form-grid">
@@ -626,17 +574,16 @@ function renderCadastro(){
           <div class="field"><label>UF</label><input required name="uf" value="${form.uf}" placeholder="MG" maxlength="2" style="text-transform:uppercase;"></div>
         </div>
       </div>
-
       <div class="card">
         <div class="section-label">Dados do atleta</div>
-        ${form.atletaTipo==='filho' ? `
+        ${form.atletaTipo==='filho'?`
           <div class="form-grid">
             <div class="field full"><label>Nome completo do atleta</label><input required name="atletaNome" value="${form.atletaNome}" placeholder="Nome do seu filho(a)"></div>
             <div class="field"><label>Data de nascimento</label><input required type="date" name="atletaNascimento" value="${form.atletaNascimento}"></div>
             <div class="field"><label>Unidade</label>${renderUnidadeSelect()}</div>
             <div class="field full"><label>Condomínio / Bloco</label><input required name="condominio" value="${form.condominio}" placeholder="Ex: Reserva do Bosque, Bloco 2"></div>
           </div>
-        ` : `
+        `:`
           <div class="self-note">🙋 Você será cadastrado(a) como o próprio atleta, usando os dados informados acima.</div>
           <div class="form-grid">
             <div class="field"><label>Data de nascimento</label><input required type="date" name="atletaNascimento" value="${form.atletaNascimento}"></div>
@@ -645,7 +592,6 @@ function renderCadastro(){
           </div>
         `}
       </div>
-
       <div class="card">
         <div class="section-label">Modalidade</div>
         <div class="modalidades">
@@ -658,608 +604,366 @@ function renderCadastro(){
           `).join('')}
         </div>
       </div>
-
       <button type="submit" class="btn btn-cone btn-block" id="submitBtn" ${validoForm()?'':'disabled'}>Enviar cadastro</button>
       <p class="lgpd-note">Seus dados são usados apenas para criar sua matrícula, gerar a cobrança da mensalidade e o seu acesso ao painel do responsável.</p>
     </form>
   `;
 }
 function renderUnidadeSelect(){
-  return `
-    <select required name="unidade">
-      <option value="" ${form.unidade===''?'selected':''} disabled>Selecione</option>
-      ${unidades.map(u=>`<option value="${u}" ${form.unidade===u?'selected':''}>${u}</option>`).join('')}
-    </select>
-  `;
+  return `<select required name="unidade"><option value="" ${form.unidade===''?'selected':''} disabled>Selecione</option>${unidades.map(u=>`<option value="${u}" ${form.unidade===u?'selected':''}>${u}</option>`).join('')}</select>`;
 }
 function wireCadastro(){
-  const novo = document.getElementById('novoCadastroBtn');
-  if(novo){ novo.onclick = ()=>{ state.cadastroEnviado=false; resetForm(); render(); }; return; }
-
-  document.querySelectorAll('.seg-opt[data-tipo]').forEach(el=>{ el.onclick = ()=>{ form.atletaTipo = el.dataset.tipo; render(); }; });
-  document.querySelectorAll('.modalidade-card').forEach(el=>{ el.onclick = ()=>{ form.modalidade = el.dataset.select; render(); }; });
-
+  const novo=document.getElementById('novoCadastroBtn');
+  if(novo){ novo.onclick=()=>{ state.cadastroEnviado=false; resetForm(); render(); }; return; }
+  document.querySelectorAll('.seg-opt[data-tipo]').forEach(el=>{ el.onclick=()=>{ form.atletaTipo=el.dataset.tipo; render(); }; });
+  document.querySelectorAll('.modalidade-card').forEach(el=>{ el.onclick=()=>{ form.modalidade=el.dataset.select; render(); }; });
   document.querySelectorAll('#cadastroForm input').forEach(inp=>{
-    inp.oninput = ()=>{
-      let v = inp.value;
-      if(inp.name==='pagadorCpf') v = maskCpf(v);
-      if(inp.name==='pagadorCelular') v = maskCelular(v);
-      if(inp.name==='cep') v = maskCep(v);
-      if(inp.name==='uf') v = v.toUpperCase();
-      form[inp.name] = v;
-      const btn = document.getElementById('submitBtn');
-      if(btn) btn.disabled = !validoForm();
+    inp.oninput=()=>{
+      let v=inp.value;
+      if(inp.name==='pagadorCpf') v=maskCpf(v);
+      if(inp.name==='pagadorCelular') v=maskCelular(v);
+      if(inp.name==='cep') v=maskCep(v);
+      if(inp.name==='uf') v=v.toUpperCase();
+      inp.value=v; form[inp.name]=v;
+      const btn=document.getElementById('submitBtn'); if(btn) btn.disabled=!validoForm();
     };
-    inp.onblur = ()=>{ if(inp.name==='cep') buscarCep(form.cep); };
+    inp.onblur=()=>{ if(inp.name==='cep') buscarCep(form.cep); };
   });
-  document.querySelectorAll('#cadastroForm select').forEach(sel=>{
-    sel.onchange = ()=>{ form[sel.name] = sel.value; const btn=document.getElementById('submitBtn'); if(btn) btn.disabled=!validoForm(); };
-  });
-
-  document.getElementById('cadastroForm').onsubmit = e=>{
-    e.preventDefault();
-    if(!validoForm()) return;
-    const novoAluno = {
-      id: nextId++, atletaTipo: form.atletaTipo,
-      nome: form.atletaTipo==='proprio' ? form.pagadorNome : form.atletaNome,
-      nascimento: form.atletaNascimento, condominio: form.condominio, unidade: form.unidade, modalidade: form.modalidade,
-      status: 'pendente', turmaId: null,
-      pagador:{ nome: form.pagadorNome, cpf: form.pagadorCpf, email: form.pagadorEmail, celular: form.pagadorCelular,
-        endereco:{ cep:form.cep, logradouro:form.endereco, numero:form.numero, complemento:form.complemento, bairro:form.bairro, cidade:form.cidade, uf:form.uf } },
-      cobrancas: [],
-    };
-    // BACKEND: gravar no banco + Sheets + criar cliente no Asaas + enviar e-mail
-    // com a senha/link de primeiro acesso ao painel do responsável.
-    alunos.unshift(novoAluno);
-    state.protocolo = 'VH-' + Math.random().toString(36).slice(2,8).toUpperCase();
-    state.cadastroEnviado = true;
-    render();
+  document.querySelectorAll('#cadastroForm select').forEach(sel=>{ sel.onchange=()=>{ form[sel.name]=sel.value; const btn=document.getElementById('submitBtn'); if(btn) btn.disabled=!validoForm(); }; });
+  document.getElementById('cadastroForm').onsubmit=async e=>{
+    e.preventDefault(); if(!validoForm()) return;
+    const btn=document.getElementById('submitBtn'); btn.disabled=true; btn.textContent='Enviando...';
+    try{
+      const data=await apiFetch('/api/cadastros',{method:'POST',body:JSON.stringify({
+        atleta:{nome:form.atletaTipo==='proprio'?form.pagadorNome:form.atletaNome,nascimento:form.atletaNascimento,condominio:form.condominio,unidade:form.unidade,modalidade:form.modalidade,tipo:form.atletaTipo},
+        pagador:{nome:form.pagadorNome,cpf:form.pagadorCpf,email:form.pagadorEmail,celular:form.pagadorCelular,
+          endereco:{cep:form.cep,logradouro:form.endereco,numero:form.numero,complemento:form.complemento,bairro:form.bairro,cidade:form.cidade,uf:form.uf}}
+      })});
+      state.protocolo=data.protocolo; state.cadastroEnviado=true; render();
+    }catch(err){ btn.disabled=false; btn.textContent='Enviar cadastro'; showToast('Erro: '+err.message); }
   };
 }
 
 /* ---------- Painel Admin — Alunos ---------- */
 function renderPainel(){
-  document.getElementById('appWrap').className = 'wrap';
-  const counts = {
-    pendentes: alunos.filter(a=>computeStatus(a)==='pendente').length,
-    ativos: alunos.filter(a=>computeStatus(a)==='ativo').length,
-    inadimplentes: alunos.filter(a=>computeStatus(a)==='inadimplente').length,
-    todos: alunos.length,
-  };
-  const map = { pendentes:'pendente', ativos:'ativo', inadimplentes:'inadimplente' };
-  const list = state.filter==='todos' ? alunos : alunos.filter(a=>computeStatus(a)===map[state.filter]);
-
+  document.getElementById('appWrap').className='wrap';
+  if(state.loading) return `<div class="hero"><div><p class="display">Painel Admin</p></div></div>${loadingHTML()}`;
+  const list=state.alunos;
+  const counts={pendentes:list.filter(a=>computeStatus(a)==='pendente').length,ativos:list.filter(a=>computeStatus(a)==='ativo').length,inadimplentes:list.filter(a=>computeStatus(a)==='inadimplente').length,todos:list.length};
+  const map={pendentes:'pendente',ativos:'ativo',inadimplentes:'inadimplente'};
+  const filtered=state.filter==='todos'?list:list.filter(a=>computeStatus(a)===map[state.filter]);
   return `
     <div class="hero">
-      <div>
-        <p class="display">Painel Admin</p>
-        <p>Aprove cadastros, defina a turma e acompanhe pagamentos de todos os atletas — de todas as modalidades e unidades.</p>
-      </div>
+      <div><p class="display">Painel Admin</p><p>Aprove cadastros, defina a turma e acompanhe pagamentos de todos os atletas — de todas as modalidades e unidades.</p></div>
       <div class="badge-club"><span class="dot" style="background:var(--amber);"></span> ${counts.pendentes} aguardando aprovação</div>
     </div>
     <div class="filter-row">
-      ${chip('pendentes','Pendentes',counts.pendentes)}
-      ${chip('ativos','Ativos',counts.ativos)}
-      ${chip('inadimplentes','Inadimplentes',counts.inadimplentes)}
-      ${chip('todos','Todos',counts.todos)}
+      ${chip('pendentes','Pendentes',counts.pendentes)}${chip('ativos','Ativos',counts.ativos)}${chip('inadimplentes','Inadimplentes',counts.inadimplentes)}${chip('todos','Todos',counts.todos)}
     </div>
-    <div id="alunoList">${ list.length ? list.map(alunoRow).join('') : emptyState(state.filter) }</div>
+    <div id="alunoList">${filtered.length?filtered.map(alunoRow).join(''):emptyState(state.filter)}</div>
   `;
 }
-function chip(key,label,count){
-  return `<button class="filter-chip ${state.filter===key?'active':''}" data-filter="${key}">${label} <span class="count">${count}</span></button>`;
-}
-function emptyState(filter){
-  const msgs = { pendentes:'Nenhum cadastro pendente no momento.', ativos:'Nenhum aluno ativo nesse filtro.', inadimplentes:'Ninguém inadimplente por aqui — bom sinal!', todos:'Nenhum aluno cadastrado ainda.' };
-  return `<div class="empty-state"><div class="ball">⚽</div>${msgs[filter]}</div>`;
-}
+function chip(key,label,count){ return `<button class="filter-chip ${state.filter===key?'active':''}" data-filter="${key}">${label} <span class="count">${count}</span></button>`; }
+function emptyState(filter){ const msgs={pendentes:'Nenhum cadastro pendente no momento.',ativos:'Nenhum aluno ativo nesse filtro.',inadimplentes:'Ninguém inadimplente por aqui — bom sinal!',todos:'Nenhum aluno cadastrado ainda.'}; return `<div class="empty-state"><div class="ball">⚽</div>${msgs[filter]||'Nenhum resultado.'}</div>`; }
 function alunoRow(a){
-  const st = computeStatus(a);
-  const badgeMap = { pendente:['badge-pendente','Pendente'], ativo:['badge-ativo','Ativo'], inadimplente:['badge-inadimplente','Inadimplente'] };
-  const [cls,label] = badgeMap[st];
-  const mod = modalidadeInfo(a.modalidade);
-  const turma = turmaById(a.turmaId);
-  const sub = a.status==='pendente'
-    ? `${mod.icon} ${mod.nome} · ${a.unidade} · ${a.condominio}`
-    : `${mod.icon} ${mod.nome} · ${turma ? turma.nome+' · '+turma.horario : 'Sem turma'} · ${a.unidade}`;
-  return `
-    <div class="aluno-row" data-id="${a.id}">
-      <div class="avatar">${initials(a.nome)}</div>
-      <div class="aluno-info">
-        <div class="nome">${a.nome} <span style="color:var(--muted); font-weight:600; font-size:12.5px;">· ${idade(a.nascimento)} anos</span></div>
-        <div class="meta">${sub}</div>
-      </div>
-      <span class="badge ${cls}">${label}</span>
-      <span class="chevron">›</span>
-    </div>
-  `;
+  const st=computeStatus(a),badgeMap={pendente:['badge-pendente','Pendente'],ativo:['badge-ativo','Ativo'],inadimplente:['badge-inadimplente','Inadimplente']};
+  const [cls,label]=badgeMap[st],mod=modalidadeInfo(a.modalidade);
+  const sub=a.status==='pendente'?`${mod.icon} ${mod.nome} · ${a.unidade} · ${a.condominio}`:`${mod.icon} ${mod.nome} · ${a.turma_nome?a.turma_nome+' · '+a.turma_horario:'Sem turma'} · ${a.unidade}`;
+  return `<div class="aluno-row" data-id="${a.id}"><div class="avatar">${initials(a.nome)}</div><div class="aluno-info"><div class="nome">${a.nome} <span style="color:var(--muted);font-weight:600;font-size:12.5px;">· ${idade(a.nascimento)} anos</span></div><div class="meta">${sub}</div></div><span class="badge ${cls}">${label}</span><span class="chevron">›</span></div>`;
 }
 function wirePainel(){
-  document.querySelectorAll('.filter-chip').forEach(c=>{ c.onclick = ()=>{ state.filter = c.dataset.filter; render(); }; });
-  document.querySelectorAll('.aluno-row').forEach(r=>{ r.onclick = ()=>{ state.selectedId = Number(r.dataset.id); state.view='ficha'; render(); }; });
+  document.querySelectorAll('.filter-chip').forEach(c=>{ c.onclick=()=>{ state.filter=c.dataset.filter; render(); }; });
+  document.querySelectorAll('.aluno-row').forEach(r=>{ r.onclick=()=>{ state.selectedId=Number(r.dataset.id); navigate('ficha'); }; });
 }
 
-/* ---------- Painel Admin — Turmas ---------- */
+/* ---------- Turmas ---------- */
 function renderTurmas(){
-  document.getElementById('appWrap').className = 'wrap';
+  document.getElementById('appWrap').className='wrap';
+  if(state.loading) return `<div class="hero"><div><p class="display">Turmas</p></div></div>${loadingHTML()}`;
   return `
     <div class="hero">
-      <div>
-        <p class="display">Turmas</p>
-        <p>Crie as turmas de cada modalidade e unidade, e veja quem está matriculado em cada uma.</p>
-      </div>
+      <div><p class="display">Turmas</p><p>Crie as turmas de cada modalidade e unidade, e veja quem está matriculado em cada uma.</p></div>
       <button class="btn btn-cone" id="novaTurmaBtn">+ Nova turma</button>
     </div>
-    ${modalidades.map(m=>{
-      const doModalidade = turmas.filter(t=>t.modalidade===m.id);
-      if(!doModalidade.length) return '';
-      return `
-        <div class="modalidade-section">
-          <div class="head">${m.icon} ${m.nome}</div>
-          <div class="turma-grid">
-            ${doModalidade.map(t=>{
-              const n = alunos.filter(a=>a.turmaId===t.id).length;
-              return `
-                <div class="turma-card" data-turma="${t.id}">
-                  <div class="nome">${t.nome}</div>
-                  <div class="meta">${t.unidade} · ${t.horario}</div>
-                  <div class="count">${n}${t.capacidade?'/'+t.capacidade:''} matriculados</div>
-                </div>
-              `;
-            }).join('')}
-          </div>
-        </div>
-      `;
-    }).join('') || `<div class="empty-state"><div class="ball">🗂️</div>Nenhuma turma cadastrada ainda. Crie a primeira!</div>`}
+    ${modalidades.map(m=>{ const dM=state.turmas.filter(t=>t.modalidade===m.id); if(!dM.length) return '';
+      return `<div class="modalidade-section"><div class="head">${m.icon} ${m.nome}</div><div class="turma-grid">
+        ${dM.map(t=>`<div class="turma-card" data-turma="${t.id}"><div class="nome">${t.nome}</div><div class="meta">${t.unidade} · ${t.horario}</div><div class="count">${t.matriculados||0}${t.capacidade?'/'+t.capacidade:''} matriculados</div></div>`).join('')}
+      </div></div>`;
+    }).join('')||`<div class="empty-state"><div class="ball">🗂️</div>Nenhuma turma cadastrada ainda. Crie a primeira!</div>`}
   `;
 }
 function wireTurmas(){
-  const novaBtn = document.getElementById('novaTurmaBtn');
-  if(novaBtn) novaBtn.onclick = ()=>{ state.showTurmaModal = true; render(); };
-  document.querySelectorAll('.turma-card').forEach(c=>{
-    c.onclick = ()=>{ state.selectedTurmaId = c.dataset.turma; state.view='turmaDetalhe'; render(); };
-  });
+  const nb=document.getElementById('novaTurmaBtn'); if(nb) nb.onclick=()=>{ state.showTurmaModal=true; render(); };
+  document.querySelectorAll('.turma-card').forEach(c=>{ c.onclick=()=>{ state.selectedTurmaId=c.dataset.turma; navigate('turmaDetalhe'); }; });
 }
-
 function renderTurmaDetalhe(){
-  document.getElementById('appWrap').className = 'wrap';
-  const t = turmaById(state.selectedTurmaId);
-  if(!t){ state.view='turmas'; return renderTurmas(); }
-  const mod = modalidadeInfo(t.modalidade);
-  const doTurma = alunos.filter(a=>a.turmaId===t.id);
+  document.getElementById('appWrap').className='wrap';
+  const t=state.turmas.find(x=>String(x.id)===String(state.selectedTurmaId));
+  if(state.loading) return `<button class="back-link" id="backTurmasBtn">← Voltar às turmas</button>${loadingHTML()}`;
+  if(!t) return `<button class="back-link" id="backTurmasBtn">← Voltar às turmas</button><div class="empty-state">Turma não encontrada.</div>`;
+  const mod=modalidadeInfo(t.modalidade),doTurma=state.turmaAlunos;
   return `
     <button class="back-link" id="backTurmasBtn">← Voltar às turmas</button>
     <div class="hero">
-      <div>
-        <p class="display">${t.nome}</p>
-        <p>${mod.icon} ${mod.nome} · ${t.unidade} · ${t.horario} ${t.capacidade ? '· capacidade '+t.capacidade : ''}</p>
-      </div>
+      <div><p class="display">${t.nome}</p><p>${mod.icon} ${mod.nome} · ${t.unidade} · ${t.horario} ${t.capacidade?'· capacidade '+t.capacidade:''}</p></div>
       <div class="badge-club"><span class="dot"></span> ${doTurma.length} matriculado(s)</div>
     </div>
-    <div>${ doTurma.length ? doTurma.map(alunoRow).join('') : `<div class="empty-state"><div class="ball">🧍</div>Ninguém matriculado nessa turma ainda.</div>` }</div>
+    <div>${doTurma.length?doTurma.map(a=>`<div class="aluno-row" data-id="${a.id}"><div class="avatar">${initials(a.nome)}</div><div class="aluno-info"><div class="nome">${a.nome}</div><div class="meta">${modalidadeInfo(a.modalidade).icon} ${modalidadeInfo(a.modalidade).nome} · ${a.pagador_nome}</div></div><span class="chevron">›</span></div>`).join(''):`<div class="empty-state"><div class="ball">🧍</div>Ninguém matriculado nessa turma ainda.</div>`}</div>
   `;
 }
 function wireTurmaDetalhe(){
-  document.getElementById('backTurmasBtn').onclick = ()=>{ state.view='turmas'; render(); };
-  document.querySelectorAll('.aluno-row').forEach(r=>{ r.onclick = ()=>{ state.selectedId = Number(r.dataset.id); state.view='ficha'; render(); }; });
+  document.getElementById('backTurmasBtn').onclick=()=>navigate('turmas');
+  document.querySelectorAll('.aluno-row').forEach(r=>{ r.onclick=()=>{ state.selectedId=Number(r.dataset.id); navigate('ficha'); }; });
 }
 
 /* ---------- Ficha do aluno (admin) ---------- */
 function renderFicha(){
-  document.getElementById('appWrap').className = 'wrap';
-  const a = alunos.find(x=>x.id===state.selectedId);
-  if(!a) { state.view='painel'; return renderPainel(); }
-  const st = computeStatus(a);
-  const badgeMap = { pendente:['badge-pendente','Pendente'], ativo:['badge-ativo','Ativo'], inadimplente:['badge-inadimplente','Inadimplente'] };
-  const [cls,label] = badgeMap[st];
-  const mod = modalidadeInfo(a.modalidade);
-  const turma = turmaById(a.turmaId);
-
-  const stageIndex = a.status==='pendente' ? 0 : (a.cobrancas.length===0 ? 2 : 3);
-  const stops = ['Cadastro','Aprovação','Turma definida','Cobrança ativa'];
-
+  document.getElementById('appWrap').className='wrap';
+  if(state.loading) return loadingHTML();
+  const a=state.alunoDetalhe;
+  if(!a) return `<button class="back-link" id="backBtn">← Voltar</button><div class="empty-state">Aluno não encontrado.</div>`;
+  const st=computeStatus(a),badgeMap={pendente:['badge-pendente','Pendente'],ativo:['badge-ativo','Ativo'],inadimplente:['badge-inadimplente','Inadimplente']};
+  const [cls,label]=badgeMap[st],mod=modalidadeInfo(a.modalidade),turma=a.turma,pagador=a.pagador,cobrancas=a.cobrancas||[];
+  const stageIndex=a.status==='pendente'?0:(cobrancas.length===0?2:3);
+  const stops=['Cadastro','Aprovação','Turma definida','Cobrança ativa'];
   return `
     <button class="back-link" id="backBtn">← Voltar</button>
     <div class="ficha-head">
       <div class="ficha-title">
         <div class="avatar-lg">${initials(a.nome)}</div>
-        <div>
-          <p class="display">${a.nome}</p>
-          <div class="sub">${idade(a.nascimento)} anos · ${a.condominio}</div>
-        </div>
+        <div><p class="display">${a.nome}</p><div class="sub">${idade(a.nascimento)} anos · ${a.condominio}</div></div>
       </div>
       <div class="badge-row">
         <span class="badge badge-sport" data-sport="${a.modalidade}">${mod.icon} ${mod.nome}</span>
         <span class="badge ${cls}">${label}</span>
       </div>
     </div>
-
     <div class="pitch-tracker">
       <div class="pitch-label">Trajetória do atleta</div>
       <div class="pitch-track">
-        ${stops.map((s,i)=>`
-          <div class="pitch-stop ${i>stageIndex?'inactive':''}">
-            <div class="pitch-node ${i<stageIndex?'done':''} ${i===stageIndex?'current':''}">${i<stageIndex?'✓':'⚽'}</div>
-            <div class="stop-label">${s}</div>
-          </div>
-        `).join('')}
+        ${stops.map((s,i)=>`<div class="pitch-stop ${i>stageIndex?'inactive':''}"><div class="pitch-node ${i<stageIndex?'done':''} ${i===stageIndex?'current':''}">${i<stageIndex?'✓':'⚽'}</div><div class="stop-label">${s}</div></div>`).join('')}
       </div>
     </div>
-
     <div class="info-grid">
       <div class="card info-card">
         <div class="section-label">Atleta</div>
         <div class="info-line"><span class="k">Nascimento</span><span class="v">${fmtDate(a.nascimento)}</span></div>
         <div class="info-line"><span class="k">Unidade</span><span class="v">${a.unidade}</span></div>
         <div class="info-line"><span class="k">Modalidade</span><span class="v">${mod.icon} ${mod.nome}</span></div>
-        <div class="info-line"><span class="k">Turma</span><span class="v">${turma ? turma.nome+' · '+turma.horario : 'Não definida'}</span></div>
+        <div class="info-line"><span class="k">Turma</span><span class="v">${turma?turma.nome+' · '+turma.horario:'Não definida'}</span></div>
         <div class="info-line"><span class="k">Condomínio</span><span class="v">${a.condominio}</span></div>
       </div>
       <div class="card info-card">
         <div class="section-label">Pagador / responsável</div>
-        <div class="info-line"><span class="k">Nome</span><span class="v">${a.pagador.nome}</span></div>
-        <div class="info-line"><span class="k">CPF</span><span class="v mono">${a.pagador.cpf}</span></div>
-        <div class="info-line"><span class="k">E-mail</span><span class="v">${a.pagador.email}</span></div>
-        <div class="info-line"><span class="k">Celular</span><span class="v">${a.pagador.celular}</span></div>
-        <div class="info-line"><span class="k">Endereço</span><span class="v">${a.pagador.endereco.logradouro}, ${a.pagador.endereco.numero} — ${a.pagador.endereco.bairro}, ${a.pagador.endereco.cidade}/${a.pagador.endereco.uf}</span></div>
+        <div class="info-line"><span class="k">Nome</span><span class="v">${pagador.nome}</span></div>
+        <div class="info-line"><span class="k">CPF</span><span class="v mono">${pagador.cpf}</span></div>
+        <div class="info-line"><span class="k">E-mail</span><span class="v">${pagador.email}</span></div>
+        <div class="info-line"><span class="k">Celular</span><span class="v">${pagador.celular}</span></div>
+        <div class="info-line"><span class="k">Endereço</span><span class="v">${pagador.logradouro?pagador.logradouro+', '+pagador.numero+' — '+pagador.bairro+', '+pagador.cidade+'/'+pagador.uf:'—'}</span></div>
       </div>
     </div>
-
-    ${a.status==='pendente' ? `
-      <div class="card" style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
-        <div>
-          <div class="section-label" style="margin-top:0;">Aprovação pendente</div>
-          <p style="margin:0; color:var(--muted); font-size:13.5px;">Escolha a turma de ${mod.nome} para liberar o cliente no Asaas e habilitar cobranças.</p>
-        </div>
+    ${a.status==='pendente'?`
+      <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+        <div><div class="section-label" style="margin-top:0;">Aprovação pendente</div><p style="margin:0;color:var(--muted);font-size:13.5px;">Escolha a turma de ${mod.nome} para liberar o cliente no Asaas e habilitar cobranças.</p></div>
         <button class="btn btn-primary" id="aprovarBtn">Aprovar e definir turma</button>
       </div>
-    ` : `
+    `:`
       <div class="card">
-        <div class="hist-head">
-          <p class="display">Histórico de cobranças</p>
-          <button class="btn btn-cone btn-sm" id="cobrancaBtn">+ Nova cobrança</button>
-        </div>
-        ${a.cobrancas.length ? `
-          <table>
-            <thead><tr><th>Descrição</th><th>Tipo</th><th>Vencimento</th><th>Valor</th><th>Status</th></tr></thead>
-            <tbody>
-              ${a.cobrancas.slice().reverse().map(c=>`
-                <tr>
-                  <td>${c.descricao}</td>
-                  <td style="text-transform:capitalize; color:var(--muted);">${c.tipo}</td>
-                  <td>${fmtDate(c.vencimento)}</td>
-                  <td class="val-cell">${fmtMoney(c.valor)}</td>
-                  <td><span class="badge badge-${c.status}">${c.status}</span></td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        ` : `<div class="empty-state"><div class="ball">💳</div>Nenhuma cobrança criada ainda.</div>`}
+        <div class="hist-head"><p class="display">Histórico de cobranças</p><button class="btn btn-cone btn-sm" id="cobrancaBtn">+ Nova cobrança</button></div>
+        ${cobrancas.length?`
+          <table><thead><tr><th>Descrição</th><th>Tipo</th><th>Vencimento</th><th>Valor</th><th>Status</th></tr></thead><tbody>
+            ${cobrancas.slice().reverse().map(c=>`<tr><td>${c.descricao}</td><td style="text-transform:capitalize;color:var(--muted);">${c.tipo}</td><td>${fmtDate(c.vencimento)}</td><td class="val-cell">${fmtMoney(c.valor)}</td><td><span class="badge badge-${c.status}">${c.status}</span></td></tr>`).join('')}
+          </tbody></table>
+        `:`<div class="empty-state"><div class="ball">💳</div>Nenhuma cobrança criada ainda.</div>`}
       </div>
     `}
   `;
 }
 function wireFicha(){
-  document.getElementById('backBtn').onclick = ()=>{ state.view = state.selectedTurmaId ? 'turmaDetalhe' : 'painel'; render(); };
-  const aprovar = document.getElementById('aprovarBtn');
-  if(aprovar) aprovar.onclick = ()=>{ state.showAprovarModal = state.selectedId; render(); };
-  const cobranca = document.getElementById('cobrancaBtn');
-  if(cobranca) cobranca.onclick = ()=>{ state.showCobrancaModal = state.selectedId; render(); };
+  const back=document.getElementById('backBtn');
+  if(back) back.onclick=()=>{ state.selectedTurmaId?navigate('turmaDetalhe'):navigate('painel'); };
+  const aprovar=document.getElementById('aprovarBtn'); if(aprovar) aprovar.onclick=()=>{ state.showAprovarModal=state.selectedId; render(); };
+  const cobranca=document.getElementById('cobrancaBtn'); if(cobranca) cobranca.onclick=()=>{ state.showCobrancaModal=state.selectedId; render(); };
 }
 
-/* ---------- Painel do responsável (cliente) ---------- */
+/* ---------- Portal do responsável ---------- */
 function renderClientePainel(){
-  document.getElementById('appWrap').className = 'wrap';
-  const meus = alunos.filter(a=>cpfDigits(a.pagador.cpf)===state.session.cpf);
-  const nomePagador = meus.length ? meus[0].pagador.nome : 'Responsável';
+  document.getElementById('appWrap').className='wrap';
+  if(state.loading) return loadingHTML();
+  const meus=state.clienteAlunos,nome=state.session.nome||'Responsável';
   return `
-    <div class="welcome-banner">
-      <p class="display">Olá, ${nomePagador.split(' ')[0]}!</p>
-      <p>Acompanhe a matrícula e as cobranças de cada atleta vinculado ao seu CPF.</p>
-    </div>
+    <div class="welcome-banner"><p class="display">Olá, ${nome.split(' ')[0]}!</p><p>Acompanhe a matrícula e as cobranças de cada atleta vinculado ao seu CPF.</p></div>
     <div class="section-label">Meus atletas</div>
-    <div>${ meus.length ? meus.map(alunoRowCliente).join('') : `<div class="empty-state"><div class="ball">⚽</div>Nenhum atleta encontrado para esse CPF ainda.</div>` }</div>
+    <div>${meus.length?meus.map(alunoRowCliente).join(''):`<div class="empty-state"><div class="ball">⚽</div>Nenhum atleta encontrado para esse CPF ainda.</div>`}</div>
   `;
 }
 function alunoRowCliente(a){
-  const st = computeStatus(a);
-  const badgeMap = { pendente:['badge-pendente','Pendente'], ativo:['badge-ativo','Ativo'], inadimplente:['badge-inadimplente','Inadimplente'] };
-  const [cls,label] = badgeMap[st];
-  const mod = modalidadeInfo(a.modalidade);
-  const turma = turmaById(a.turmaId);
-  const sub = a.status==='pendente' ? `${mod.icon} ${mod.nome} · aguardando aprovação` : `${mod.icon} ${mod.nome} · ${turma ? turma.nome+' · '+turma.horario : 'sem turma'}`;
-  return `
-    <div class="aluno-row" data-id="${a.id}">
-      <div class="avatar">${initials(a.nome)}</div>
-      <div class="aluno-info">
-        <div class="nome">${a.nome} <span style="color:var(--muted); font-weight:600; font-size:12.5px;">· ${idade(a.nascimento)} anos</span></div>
-        <div class="meta">${sub}</div>
-      </div>
-      <span class="badge ${cls}">${label}</span>
-      <span class="chevron">›</span>
-    </div>
-  `;
+  const st=computeStatus(a),badgeMap={pendente:['badge-pendente','Pendente'],ativo:['badge-ativo','Ativo'],inadimplente:['badge-inadimplente','Inadimplente']};
+  const [cls,label]=badgeMap[st],mod=modalidadeInfo(a.modalidade);
+  const sub=a.status==='pendente'?`${mod.icon} ${mod.nome} · aguardando aprovação`:`${mod.icon} ${mod.nome} · ${a.turma_nome?a.turma_nome+' · '+a.turma_horario:'sem turma'}`;
+  return `<div class="aluno-row" data-id="${a.id}"><div class="avatar">${initials(a.nome)}</div><div class="aluno-info"><div class="nome">${a.nome} <span style="color:var(--muted);font-weight:600;font-size:12.5px;">· ${idade(a.nascimento)} anos</span></div><div class="meta">${sub}</div></div><span class="badge ${cls}">${label}</span><span class="chevron">›</span></div>`;
 }
-function wireClientePainel(){
-  document.querySelectorAll('.aluno-row').forEach(r=>{ r.onclick = ()=>{ state.selectedId = Number(r.dataset.id); state.view='clienteFilho'; render(); }; });
-}
+function wireClientePainel(){ document.querySelectorAll('.aluno-row').forEach(r=>{ r.onclick=()=>{ state.selectedId=Number(r.dataset.id); navigate('clienteFilho'); }; }); }
 
 function renderClienteFilho(){
-  document.getElementById('appWrap').className = 'wrap';
-  const a = alunos.find(x=>x.id===state.selectedId && cpfDigits(x.pagador.cpf)===state.session.cpf);
-  if(!a){ state.view='clientePainel'; return renderClientePainel(); }
-  const st = computeStatus(a);
-  const badgeMap = { pendente:['badge-pendente','Pendente'], ativo:['badge-ativo','Ativo'], inadimplente:['badge-inadimplente','Inadimplente'] };
-  const [cls,label] = badgeMap[st];
-  const mod = modalidadeInfo(a.modalidade);
-  const turma = turmaById(a.turmaId);
-
+  document.getElementById('appWrap').className='wrap';
+  if(state.loading) return loadingHTML();
+  const a=state.clienteFilhoDetalhe;
+  if(!a) return `<button class="back-link" id="backClienteBtn">← Meus atletas</button><div class="empty-state">Atleta não encontrado.</div>`;
+  const st=computeStatus(a),badgeMap={pendente:['badge-pendente','Pendente'],ativo:['badge-ativo','Ativo'],inadimplente:['badge-inadimplente','Inadimplente']};
+  const [cls,label]=badgeMap[st],mod=modalidadeInfo(a.modalidade),cobrancas=a.cobrancas||[];
   return `
     <button class="back-link" id="backClienteBtn">← Meus atletas</button>
     <div class="ficha-head">
-      <div class="ficha-title">
-        <div class="avatar-lg">${initials(a.nome)}</div>
-        <div>
-          <p class="display">${a.nome}</p>
-          <div class="sub">${idade(a.nascimento)} anos · ${a.unidade}</div>
-        </div>
-      </div>
-      <div class="badge-row">
-        <span class="badge badge-sport" data-sport="${a.modalidade}">${mod.icon} ${mod.nome}</span>
-        <span class="badge ${cls}">${label}</span>
-      </div>
+      <div class="ficha-title"><div class="avatar-lg">${initials(a.nome)}</div><div><p class="display">${a.nome}</p><div class="sub">${idade(a.nascimento)} anos · ${a.unidade}</div></div></div>
+      <div class="badge-row"><span class="badge badge-sport" data-sport="${a.modalidade}">${mod.icon} ${mod.nome}</span><span class="badge ${cls}">${label}</span></div>
     </div>
-
     <div class="card info-card" style="margin-bottom:24px;">
       <div class="section-label">Dados da matrícula</div>
-      <div class="info-line"><span class="k">Turma</span><span class="v">${turma ? turma.nome+' · '+turma.horario : 'Aguardando aprovação'}</span></div>
+      <div class="info-line"><span class="k">Turma</span><span class="v">${a.turma_nome?a.turma_nome+' · '+a.turma_horario:'Aguardando aprovação'}</span></div>
       <div class="info-line"><span class="k">Condomínio</span><span class="v">${a.condominio}</span></div>
       <div class="info-line"><span class="k">Nascimento</span><span class="v">${fmtDate(a.nascimento)}</span></div>
     </div>
-
     <div class="card">
       <div class="hist-head"><p class="display">Faturas e cobranças</p></div>
-      ${a.status==='pendente' ? `
-        <div class="empty-state"><div class="ball">⏳</div>Assim que a matrícula for aprovada, as faturas aparecem aqui.</div>
-      ` : a.cobrancas.length ? `
-        <table>
-          <thead><tr><th>Descrição</th><th>Vencimento</th><th>Valor</th><th>Status</th><th></th></tr></thead>
-          <tbody>
-            ${a.cobrancas.slice().reverse().map(c=>`
-              <tr>
-                <td>${c.descricao}</td>
-                <td>${fmtDate(c.vencimento)}</td>
-                <td class="val-cell">${fmtMoney(c.valor)}</td>
-                <td><span class="badge badge-${c.status}">${c.status}</span></td>
-                <td>
-                  ${c.link ? `<button class="invoice-btn ${c.status==='pago'?'secondary':''}" data-link="${c.link}">${c.status==='pago' ? 'Ver recibo' : 'Pagar fatura'}</button>` : ''}
-                </td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      ` : `<div class="empty-state"><div class="ball">💳</div>Nenhuma cobrança gerada ainda.</div>`}
+      ${a.status==='pendente'?`<div class="empty-state"><div class="ball">⏳</div>Assim que a matrícula for aprovada, as faturas aparecem aqui.</div>`:
+        cobrancas.length?`
+          <table><thead><tr><th>Descrição</th><th>Vencimento</th><th>Valor</th><th>Status</th><th></th></tr></thead><tbody>
+            ${cobrancas.slice().reverse().map(c=>`<tr><td>${c.descricao}</td><td>${fmtDate(c.vencimento)}</td><td class="val-cell">${fmtMoney(c.valor)}</td><td><span class="badge badge-${c.status}">${c.status}</span></td><td>${c.link?`<button class="invoice-btn ${c.status==='pago'?'secondary':''}" data-link="${c.link}">${c.status==='pago'?'Ver recibo':'Pagar fatura'}</button>`:''}</td></tr>`).join('')}
+          </tbody></table>
+        `:`<div class="empty-state"><div class="ball">💳</div>Nenhuma cobrança gerada ainda.</div>`}
     </div>
   `;
 }
 function wireClienteFilho(){
-  document.getElementById('backClienteBtn').onclick = ()=>{ state.view='clientePainel'; render(); };
-  document.querySelectorAll('.invoice-btn').forEach(b=>{
-    // BACKEND: o link real é o invoiceUrl/bankSlipUrl devolvido pelo Asaas
-    // ao criar a cobrança — aqui é só um placeholder de demonstração.
-    b.onclick = ()=>{ window.open(b.dataset.link, '_blank'); };
-  });
+  document.getElementById('backClienteBtn').onclick=()=>navigate('clientePainel');
+  document.querySelectorAll('.invoice-btn').forEach(b=>{ b.onclick=()=>{ window.open(b.dataset.link,'_blank'); }; });
 }
 
 /* ---------- Modais ---------- */
 function renderModal(){
   if(state.showAprovarModal){
-    const a = alunos.find(x=>x.id===state.showAprovarModal);
-    const opcoes = turmas.filter(t=>t.modalidade===a.modalidade && t.unidade===a.unidade);
-    const mod = modalidadeInfo(a.modalidade);
-    return `
-      <div class="modal-overlay" id="overlay">
-        <div class="modal">
-          <p class="display">Aprovar atleta</p>
-          <p class="modal-sub">${a.nome} · ${mod.icon} ${mod.nome} · ${a.unidade}. Ao confirmar, o cliente é criado no Asaas.</p>
-          ${opcoes.length ? `
-            <div class="field">
-              <label>Turma</label>
-              <select id="turmaSelect">${opcoes.map(t=>`<option value="${t.id}">${t.nome} · ${t.horario}</option>`).join('')}</select>
-            </div>
-            <div class="modal-actions">
-              <button class="btn btn-ghost" id="cancelAprovar">Cancelar</button>
-              <button class="btn btn-primary" id="confirmAprovar">Confirmar aprovação</button>
-            </div>
-          ` : `
-            <div class="empty-state" style="padding:20px 10px;">
-              <div class="ball">🗂️</div>
-              Ainda não existe turma de ${mod.nome} na unidade ${a.unidade}.
-            </div>
-            <div class="modal-actions">
-              <button class="btn btn-ghost" id="cancelAprovar">Cancelar</button>
-              <button class="btn btn-cone" id="criarTurmaAtalho">Criar turma agora</button>
-            </div>
-          `}
-        </div>
-      </div>
-    `;
+    const a=state.alunoDetalhe; if(!a) return '';
+    const opcoes=state.turmas.filter(t=>t.modalidade===a.modalidade&&t.unidade===a.unidade),mod=modalidadeInfo(a.modalidade);
+    return `<div class="modal-overlay" id="overlay"><div class="modal">
+      <p class="display">Aprovar atleta</p>
+      <p class="modal-sub">${a.nome} · ${mod.icon} ${mod.nome} · ${a.unidade}. Ao confirmar, o cliente é criado no Asaas.</p>
+      ${opcoes.length?`
+        <div class="field"><label>Turma</label><select id="turmaSelect">${opcoes.map(t=>`<option value="${t.id}">${t.nome} · ${t.horario}</option>`).join('')}</select></div>
+        <div class="modal-actions"><button class="btn btn-ghost" id="cancelAprovar">Cancelar</button><button class="btn btn-primary" id="confirmAprovar">Confirmar aprovação</button></div>
+      `:`
+        <div class="empty-state" style="padding:20px 10px;"><div class="ball">🗂️</div>Ainda não existe turma de ${mod.nome} na unidade ${a.unidade}.</div>
+        <div class="modal-actions"><button class="btn btn-ghost" id="cancelAprovar">Cancelar</button><button class="btn btn-cone" id="criarTurmaAtalho">Criar turma agora</button></div>
+      `}
+    </div></div>`;
   }
   if(state.showCobrancaModal){
-    const a = alunos.find(x=>x.id===state.showCobrancaModal);
-    return `
-      <div class="modal-overlay" id="overlay">
-        <div class="modal">
-          <p class="display">Nova cobrança</p>
-          <p class="modal-sub">Para ${a.pagador.nome} (responsável de ${a.nome})</p>
-          <form id="cobrancaForm">
-            <div class="field">
-              <label>Tipo de cobrança</label>
-              <div class="radio-row">
-                <div class="radio-opt sel" data-tipo="avulsa">Avulsa</div>
-                <div class="radio-opt" data-tipo="recorrente">Recorrente (mensal)</div>
-              </div>
-              <input type="hidden" name="tipo" id="tipoInput" value="avulsa">
-            </div>
-            <div class="form-grid" style="margin-top:16px;">
-              <div class="field"><label>Valor (R$)</label><input required type="number" step="0.01" min="0" name="valor" placeholder="180,00"></div>
-              <div class="field"><label>Vencimento</label><input required type="date" name="vencimento"></div>
-              <div class="field full"><label>Descrição</label><input required name="descricao" placeholder="Ex: Mensalidade Futsal Sub-9 — Agosto/2026"></div>
-            </div>
-            <div class="modal-actions">
-              <button type="button" class="btn btn-ghost" id="cancelCobranca">Cancelar</button>
-              <button type="submit" class="btn btn-cone">Criar cobrança</button>
-            </div>
-          </form>
+    const a=state.alunoDetalhe; if(!a) return '';
+    return `<div class="modal-overlay" id="overlay"><div class="modal">
+      <p class="display">Nova cobrança</p>
+      <p class="modal-sub">Para ${a.pagador.nome} (responsável de ${a.nome})</p>
+      <form id="cobrancaForm">
+        <div class="field"><label>Tipo de cobrança</label>
+          <div class="radio-row"><div class="radio-opt sel" data-tipo="avulsa">Avulsa</div><div class="radio-opt" data-tipo="recorrente">Recorrente (mensal)</div></div>
+          <input type="hidden" name="tipo" id="tipoInput" value="avulsa">
         </div>
-      </div>
-    `;
+        <div class="form-grid" style="margin-top:16px;">
+          <div class="field"><label>Valor (R$)</label><input required type="number" step="0.01" min="0" name="valor" placeholder="180,00"></div>
+          <div class="field"><label>Vencimento</label><input required type="date" name="vencimento"></div>
+          <div class="field full"><label>Descrição</label><input required name="descricao" placeholder="Ex: Mensalidade Futsal Sub-9 — Agosto/2026"></div>
+        </div>
+        <div class="modal-actions"><button type="button" class="btn btn-ghost" id="cancelCobranca">Cancelar</button><button type="submit" class="btn btn-cone" id="btnCriarCobranca">Criar cobrança</button></div>
+      </form>
+    </div></div>`;
   }
   if(state.showTurmaModal){
-    const prefill = (typeof state.showTurmaModal === 'object') ? state.showTurmaModal : {};
-    return `
-      <div class="modal-overlay" id="overlay">
-        <div class="modal">
-          <p class="display">Nova turma</p>
-          <p class="modal-sub">Turmas ficam disponíveis na aprovação de cadastros e no filtro por turma.</p>
-          <form id="turmaForm">
-            <div class="form-grid">
-              <div class="field full"><label>Nome da turma</label><input required name="nome" placeholder="Ex: Sub-9 B"></div>
-              <div class="field">
-                <label>Modalidade</label>
-                <select required name="modalidade">
-                  ${modalidades.map(m=>`<option value="${m.id}" ${prefill.modalidade===m.id?'selected':''}>${m.icon} ${m.nome}</option>`).join('')}
-                </select>
-              </div>
-              <div class="field">
-                <label>Unidade</label>
-                <select required name="unidade">
-                  ${unidades.map(u=>`<option value="${u}" ${prefill.unidade===u?'selected':''}>${u}</option>`).join('')}
-                </select>
-              </div>
-              <div class="field full"><label>Horário</label><input required name="horario" placeholder="Ex: Seg/Qua · 17h"></div>
-              <div class="field"><label>Capacidade (opcional)</label><input type="number" min="1" name="capacidade" placeholder="Ex: 16"></div>
-            </div>
-            <div class="modal-actions">
-              <button type="button" class="btn btn-ghost" id="cancelTurma">Cancelar</button>
-              <button type="submit" class="btn btn-cone">Criar turma</button>
-            </div>
-          </form>
+    const prefill=(typeof state.showTurmaModal==='object')?state.showTurmaModal:{};
+    return `<div class="modal-overlay" id="overlay"><div class="modal">
+      <p class="display">Nova turma</p>
+      <p class="modal-sub">Turmas ficam disponíveis na aprovação de cadastros e no filtro por turma.</p>
+      <form id="turmaForm">
+        <div class="form-grid">
+          <div class="field full"><label>Nome da turma</label><input required name="nome" placeholder="Ex: Sub-9 B"></div>
+          <div class="field"><label>Modalidade</label><select required name="modalidade">${modalidades.map(m=>`<option value="${m.id}" ${prefill.modalidade===m.id?'selected':''}>${m.icon} ${m.nome}</option>`).join('')}</select></div>
+          <div class="field"><label>Unidade</label><select required name="unidade">${unidades.map(u=>`<option value="${u}" ${prefill.unidade===u?'selected':''}>${u}</option>`).join('')}</select></div>
+          <div class="field full"><label>Horário</label><input required name="horario" placeholder="Ex: Seg/Qua · 17h"></div>
+          <div class="field"><label>Capacidade (opcional)</label><input type="number" min="1" name="capacidade" placeholder="Ex: 16"></div>
         </div>
-      </div>
-    `;
+        <div class="modal-actions"><button type="button" class="btn btn-ghost" id="cancelTurma">Cancelar</button><button type="submit" class="btn btn-cone" id="btnCriarTurma">Criar turma</button></div>
+      </form>
+    </div></div>`;
   }
   return '';
 }
 function wireModal(){
-  const overlay = document.getElementById('overlay');
-  if(!overlay) return;
-  overlay.onclick = e=>{ if(e.target.id==='overlay'){ state.showAprovarModal=null; state.showCobrancaModal=null; state.showTurmaModal=null; render(); } };
-
-  const cancelAprovar = document.getElementById('cancelAprovar');
-  if(cancelAprovar) cancelAprovar.onclick = ()=>{ state.showAprovarModal=null; render(); };
-  const confirmAprovar = document.getElementById('confirmAprovar');
-  if(confirmAprovar) confirmAprovar.onclick = ()=>{
-    const turmaId = document.getElementById('turmaSelect').value;
-    const a = alunos.find(x=>x.id===state.showAprovarModal);
-    a.status = 'ativo'; a.turmaId = turmaId;
-    state.showAprovarModal = null;
-    render();
-    showToast(`Cliente de ${a.pagador.nome} criado no Asaas`);
+  const overlay=document.getElementById('overlay'); if(!overlay) return;
+  overlay.onclick=e=>{ if(e.target.id==='overlay'){ state.showAprovarModal=null; state.showCobrancaModal=null; state.showTurmaModal=null; render(); } };
+  const cancelAprovar=document.getElementById('cancelAprovar'); if(cancelAprovar) cancelAprovar.onclick=()=>{ state.showAprovarModal=null; render(); };
+  const confirmAprovar=document.getElementById('confirmAprovar');
+  if(confirmAprovar) confirmAprovar.onclick=async()=>{
+    const turmaId=document.getElementById('turmaSelect').value;
+    confirmAprovar.disabled=true; confirmAprovar.textContent='Aprovando...';
+    try{
+      await apiFetch(`/api/alunos/${state.showAprovarModal}/aprovar`,{method:'POST',body:JSON.stringify({turmaId:parseInt(turmaId)})});
+      state.showAprovarModal=null; showToast('Atleta aprovado! Credenciais enviadas ao responsável.');
+      await carregarFicha(state.selectedId); render();
+    }catch(err){ showToast('Erro: '+err.message); confirmAprovar.disabled=false; confirmAprovar.textContent='Confirmar aprovação'; }
   };
-  const criarTurmaAtalho = document.getElementById('criarTurmaAtalho');
-  if(criarTurmaAtalho) criarTurmaAtalho.onclick = ()=>{
-    const a = alunos.find(x=>x.id===state.showAprovarModal);
-    state.showTurmaModal = { modalidade:a.modalidade, unidade:a.unidade, returnToAprovar:a.id };
-    state.showAprovarModal = null;
-    render();
+  const criarTurmaAtalho=document.getElementById('criarTurmaAtalho');
+  if(criarTurmaAtalho) criarTurmaAtalho.onclick=()=>{ const a=state.alunoDetalhe; state.showTurmaModal={modalidade:a.modalidade,unidade:a.unidade,returnToAprovar:a.id}; state.showAprovarModal=null; render(); };
+  const cancelCobranca=document.getElementById('cancelCobranca'); if(cancelCobranca) cancelCobranca.onclick=()=>{ state.showCobrancaModal=null; render(); };
+  document.querySelectorAll('.radio-opt').forEach(opt=>{ opt.onclick=()=>{ document.querySelectorAll('.radio-opt').forEach(o=>o.classList.remove('sel')); opt.classList.add('sel'); document.getElementById('tipoInput').value=opt.dataset.tipo; }; });
+  const cobForm=document.getElementById('cobrancaForm');
+  if(cobForm) cobForm.onsubmit=async e=>{
+    e.preventDefault(); const f=new FormData(cobForm),btn=document.getElementById('btnCriarCobranca');
+    btn.disabled=true; btn.textContent='Criando...';
+    try{
+      await apiFetch(`/api/alunos/${state.showCobrancaModal}/cobrancas`,{method:'POST',body:JSON.stringify({tipo:f.get('tipo'),valor:parseFloat(f.get('valor')),vencimento:f.get('vencimento'),descricao:f.get('descricao')})});
+      state.showCobrancaModal=null; showToast('Cobrança criada com sucesso!'); await carregarFicha(state.selectedId); render();
+    }catch(err){ showToast('Erro: '+err.message); btn.disabled=false; btn.textContent='Criar cobrança'; }
   };
-
-  const cancelCobranca = document.getElementById('cancelCobranca');
-  if(cancelCobranca) cancelCobranca.onclick = ()=>{ state.showCobrancaModal=null; render(); };
-  document.querySelectorAll('.radio-opt').forEach(opt=>{
-    opt.onclick = ()=>{
-      document.querySelectorAll('.radio-opt').forEach(o=>o.classList.remove('sel'));
-      opt.classList.add('sel');
-      document.getElementById('tipoInput').value = opt.dataset.tipo;
-    };
-  });
-  const cobForm = document.getElementById('cobrancaForm');
-  if(cobForm) cobForm.onsubmit = e=>{
-    e.preventDefault();
-    const f = new FormData(cobForm);
-    const a = alunos.find(x=>x.id===state.showCobrancaModal);
-    a.cobrancas.push({
-      id: 'c'+Date.now(), tipo: f.get('tipo'), valor: parseFloat(f.get('valor')),
-      vencimento: f.get('vencimento'), descricao: f.get('descricao'), status:'pendente',
-      link:'#' // BACKEND: substituir pelo invoiceUrl retornado pelo Asaas
-    });
-    state.showCobrancaModal = null;
-    render();
-    showToast(`Cobrança enviada por e-mail/SMS a ${a.pagador.nome}`);
-  };
-
-  const cancelTurma = document.getElementById('cancelTurma');
-  if(cancelTurma) cancelTurma.onclick = ()=>{ state.showTurmaModal=null; render(); };
-  const turmaForm = document.getElementById('turmaForm');
-  if(turmaForm) turmaForm.onsubmit = e=>{
-    e.preventDefault();
-    const f = new FormData(turmaForm);
-    const capacidade = f.get('capacidade');
-    const novaTurma = { id:'t'+(nextTurmaId++), nome:f.get('nome'), modalidade:f.get('modalidade'), unidade:f.get('unidade'), horario:f.get('horario'), capacidade: capacidade ? parseInt(capacidade) : null };
-    turmas.push(novaTurma);
-    const prefill = (typeof state.showTurmaModal === 'object') ? state.showTurmaModal : {};
-    state.showTurmaModal = null;
-    if(prefill.returnToAprovar){ state.showAprovarModal = prefill.returnToAprovar; }
-    render();
-    showToast('Turma criada com sucesso');
+  const cancelTurma=document.getElementById('cancelTurma'); if(cancelTurma) cancelTurma.onclick=()=>{ state.showTurmaModal=null; render(); };
+  const turmaForm=document.getElementById('turmaForm');
+  if(turmaForm) turmaForm.onsubmit=async e=>{
+    e.preventDefault(); const f=new FormData(turmaForm),btn=document.getElementById('btnCriarTurma');
+    btn.disabled=true; btn.textContent='Criando...';
+    try{
+      await apiFetch('/api/turmas',{method:'POST',body:JSON.stringify({nome:f.get('nome'),modalidade:f.get('modalidade'),unidade:f.get('unidade'),horario:f.get('horario'),capacidade:f.get('capacidade')?parseInt(f.get('capacidade')):null})});
+      const prefill=(typeof state.showTurmaModal==='object')?state.showTurmaModal:{};
+      state.showTurmaModal=null; await carregarTurmas();
+      if(prefill.returnToAprovar){ state.showAprovarModal=prefill.returnToAprovar; }
+      showToast('Turma criada com sucesso!'); render();
+    }catch(err){ showToast('Erro: '+err.message); btn.disabled=false; btn.textContent='Criar turma'; }
   };
 }
 
 /* ---------- Toast ---------- */
-function renderToastOnly(){
-  const old = document.querySelector('.toast');
-  if(old) old.remove();
-  if(toastMsg){
-    const t = document.createElement('div');
-    t.className='toast';
-    t.innerHTML = `<span class="dot"></span> ${toastMsg}`;
-    document.body.appendChild(t);
-  }
-}
+function renderToastOnly(){ const old=document.querySelector('.toast'); if(old) old.remove(); if(toastMsg){ const t=document.createElement('div'); t.className='toast'; t.innerHTML=`<span class="dot"></span> ${toastMsg}`; document.body.appendChild(t); } }
 
 /* ---------- Root render ---------- */
 function render(){
   renderTabs();
-  const app = document.getElementById('app');
-
-  if(!state.session){
-    app.innerHTML = state.view==='login' ? renderLogin() : renderCadastro();
-  } else if(state.session.role==='admin'){
-    if(state.view==='ficha') app.innerHTML = renderFicha();
-    else if(state.view==='turmas') app.innerHTML = renderTurmas();
-    else if(state.view==='turmaDetalhe') app.innerHTML = renderTurmaDetalhe();
-    else app.innerHTML = renderPainel();
-  } else {
-    app.innerHTML = state.view==='clienteFilho' ? renderClienteFilho() : renderClientePainel();
-  }
-
-  app.innerHTML += renderModal();
-
-  if(!state.session){ state.view==='login' ? wireLogin() : wireCadastro(); }
+  const app=document.getElementById('app');
+  if(!state.session){ app.innerHTML=state.view==='login'?renderLogin():renderCadastro(); }
+  else if(state.session.role==='admin'){
+    if(state.view==='ficha') app.innerHTML=renderFicha();
+    else if(state.view==='turmas') app.innerHTML=renderTurmas();
+    else if(state.view==='turmaDetalhe') app.innerHTML=renderTurmaDetalhe();
+    else app.innerHTML=renderPainel();
+  } else { app.innerHTML=state.view==='clienteFilho'?renderClienteFilho():renderClientePainel(); }
+  app.innerHTML+=renderModal();
+  if(!state.session){ state.view==='login'?wireLogin():wireCadastro(); }
   else if(state.session.role==='admin'){
     if(state.view==='ficha') wireFicha();
     else if(state.view==='turmas') wireTurmas();
     else if(state.view==='turmaDetalhe') wireTurmaDetalhe();
     else wirePainel();
-  } else {
-    state.view==='clienteFilho' ? wireClienteFilho() : wireClientePainel();
-  }
-  wireModal();
-  renderToastOnly();
+  } else { state.view==='clienteFilho'?wireClienteFilho():wireClientePainel(); }
+  wireModal(); renderToastOnly();
 }
 
-render();
+/* ---------- Init ---------- */
+if(state.session){ navigate(state.view); } else { render(); }
 </script>
 </body>
 </html>
